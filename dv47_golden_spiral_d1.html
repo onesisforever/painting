@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Golden Spiral on Poincaré Disk D1</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Georgia', serif;
+    color: #e8e8f0;
+  }
+  h1 {
+    font-size: 1.3em;
+    color: #c8a84b;
+    margin-bottom: 6px;
+    letter-spacing: 2px;
+    text-align: center;
+  }
+  .subtitle {
+    font-size: 0.85em;
+    color: #7a7a9a;
+    margin-bottom: 20px;
+    text-align: center;
+    font-style: italic;
+  }
+  canvas {
+    border-radius: 50%;
+    box-shadow: 0 0 60px rgba(200, 168, 75, 0.3),
+                0 0 120px rgba(100, 80, 200, 0.15);
+  }
+  .info {
+    margin-top: 20px;
+    display: flex;
+    gap: 30px;
+    font-size: 0.8em;
+    color: #9a9ab8;
+    text-align: center;
+  }
+  .info span { line-height: 1.6; }
+  .phi { color: #c8a84b; font-weight: bold; }
+  .controls {
+    margin-top: 16px;
+    display: flex;
+    gap: 12px;
+  }
+  button {
+    background: #1a1a3a;
+    border: 1px solid #3a3a6a;
+    color: #c8c8e8;
+    padding: 8px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: all 0.2s;
+  }
+  button:hover { background: #2a2a5a; border-color: #c8a84b; color: #c8a84b; }
+  button.active { background: #2a2a5a; border-color: #c8a84b; color: #c8a84b; }
+</style>
+</head>
+<body>
+
+<h1>Golden Spiral on the Poincaré Disk</h1>
+<div class="subtitle">phi = [1; 1, 1, 1, ...] — the ground state spiraling from center to infinity</div>
+
+<canvas id="c" width="520" height="520"></canvas>
+
+<div class="controls">
+  <button id="btnSpiral" class="active" onclick="toggleLayer('spiral')">Golden Spiral</button>
+  <button id="btnTiling" onclick="toggleLayer('tiling')">Tiling {5,4}</button>
+  <button id="btnGeodesics" onclick="toggleLayer('geodesics')">Geodesics</button>
+  <button id="btnAnimate" onclick="toggleAnimate()">Animate</button>
+</div>
+
+<div class="info">
+  <span>
+    <span class="phi">phi</span> = (1+√5)/2 ≈ 1.6180...<br>
+    Spiral: r = e<sup>theta * ln(phi) / (pi/2)</sup><br>
+    Each quarter turn: radius × phi
+  </span>
+  <span>
+    In Euclid: spiral expands forever<br>
+    On D1: spiral <em>compresses</em> near boundary<br>
+    Boundary = infinity = never reached
+  </span>
+  <span>
+    Collatz orbit = water drop on D1<br>
+    Flows toward center = ground state<br>
+    Center = 1 = phi attractor
+  </span>
+</div>
+
+<script>
+const PHI = (1 + Math.sqrt(5)) / 2;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const CX = W / 2, CY = W / 2;
+const R = W * 0.47; // disk radius in pixels
+
+let layers = { spiral: true, tiling: false, geodesics: false };
+let animating = false;
+let animAngle = 0;
+let animId = null;
+
+function toggleLayer(name) {
+  layers[name] = !layers[name];
+  document.getElementById('btn' + name.charAt(0).toUpperCase() + name.slice(1))
+    .classList.toggle('active', layers[name]);
+  draw();
+}
+
+function toggleAnimate() {
+  animating = !animating;
+  document.getElementById('btnAnimate').classList.toggle('active', animating);
+  if (animating) animate();
+  else { cancelAnimationFrame(animId); draw(); }
+}
+
+function animate() {
+  animAngle += 0.008;
+  draw(animAngle);
+  animId = requestAnimationFrame(animate);
+}
+
+// Convert Euclidean polar (r_euclidean, theta) to canvas coords
+// r_euclidean in [0,1] where 1 = disk boundary
+function polarToCanvas(r, theta) {
+  return [CX + r * R * Math.cos(theta), CY + r * R * Math.sin(theta)];
+}
+
+// Hyperbolic to Euclidean: map hyperbolic radius rho to Euclidean r
+// Using: r = tanh(rho/2)  (standard Poincare disk)
+function hypToEuc(rho) {
+  return Math.tanh(rho / 2);
+}
+
+// Draw background
+function drawBackground() {
+  // Deep space background
+  const bg = ctx.createRadialGradient(CX, CY, 0, CX, CY, R);
+  bg.addColorStop(0, '#0d0d2b');
+  bg.addColorStop(0.5, '#080820');
+  bg.addColorStop(1, '#050510');
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.fillStyle = bg;
+  ctx.fill();
+}
+
+// Draw disk boundary
+function drawBoundary() {
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(200, 168, 75, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Boundary label
+  ctx.fillStyle = 'rgba(200, 168, 75, 0.3)';
+  ctx.font = '11px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillText('boundary = infinity', CX, CY - R - 8);
+}
+
+// Draw geodesics (circles orthogonal to boundary)
+function drawGeodesics() {
+  ctx.save();
+  // Several geodesics through center (diameters)
+  for (let i = 0; i < 5; i++) {
+    const angle = (i / 5) * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(CX + R * Math.cos(angle), CY + R * Math.sin(angle));
+    ctx.lineTo(CX - R * Math.cos(angle), CY - R * Math.sin(angle));
+    ctx.strokeStyle = 'rgba(100, 100, 200, 0.2)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+
+  // Circular geodesics (arcs orthogonal to boundary)
+  for (let i = 0; i < 8; i++) {
+    const theta = (i / 8) * Math.PI * 2;
+    // A geodesic through two boundary points
+    const a1 = theta;
+    const a2 = theta + Math.PI * 0.6;
+    // Center of orthogonal circle
+    const p1x = R * Math.cos(a1), p1y = R * Math.sin(a1);
+    const p2x = R * Math.cos(a2), p2y = R * Math.sin(a2);
+    const mx = (p1x + p2x) / 2, my = (p1y + p2y) / 2;
+    const dist = Math.sqrt(mx * mx + my * my);
+    if (dist < 5) continue;
+    const cr = (R * R - dist * dist) / (2 * dist);
+    const cx2 = CX + mx * (1 + cr / dist);
+    const cy2 = CY + my * (1 + cr / dist);
+    const rr = Math.sqrt((cx2 - CX - p1x) ** 2 + (cy2 - CY - p1y) ** 2);
+
+    ctx.beginPath();
+    ctx.arc(cx2, cy2, rr, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(80, 80, 180, 0.15)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Draw hyperbolic tiling {5,4} approximation
+function drawTiling() {
+  ctx.save();
+  // Concentric rings of pentagons in hyperbolic metric
+  const levels = 4;
+  for (let level = 1; level <= levels; level++) {
+    const rho = level * 0.7; // hyperbolic radius
+    const r_euc = hypToEuc(rho);
+    const count = level === 1 ? 5 : level * 5;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const px = CX + r_euc * R * Math.cos(angle);
+      const py = CY + r_euc * R * Math.sin(angle);
+
+      // Pentagon
+      const pSize = R * 0.12 / level;
+      ctx.beginPath();
+      for (let j = 0; j < 5; j++) {
+        const a = (j / 5) * Math.PI * 2 - Math.PI / 2;
+        const vx = px + pSize * Math.cos(a);
+        const vy = py + pSize * Math.sin(a);
+        if (j === 0) ctx.moveTo(vx, vy);
+        else ctx.lineTo(vx, vy);
+      }
+      ctx.closePath();
+      const alpha = 0.3 / level;
+      ctx.strokeStyle = `rgba(200, 168, 75, ${alpha})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Draw golden spiral in hyperbolic metric
+function drawSpiral(angleOffset = 0) {
+  ctx.save();
+
+  const steps = 2000;
+  const thetaMax = Math.PI * 12; // 6 full rotations
+  const b = Math.log(PHI) / (Math.PI / 2);
+
+  // Main spiral - hyperbolic version
+  // In hyperbolic space: r_hyp(theta) = a * exp(b * theta)
+  // Map to Euclidean via tanh
+
+  // Draw spiral with color gradient
+  for (let i = 0; i < steps - 1; i++) {
+    const t1 = (i / steps) * thetaMax;
+    const t2 = ((i + 1) / steps) * thetaMax;
+
+    const r_hyp1 = 0.15 * Math.exp(b * t1);
+    const r_hyp2 = 0.15 * Math.exp(b * t2);
+
+    const r_euc1 = Math.min(hypToEuc(r_hyp1), 0.97);
+    const r_euc2 = Math.min(hypToEuc(r_hyp2), 0.97);
+
+    const theta1 = t1 + angleOffset;
+    const theta2 = t2 + angleOffset;
+
+    const [x1, y1] = polarToCanvas(r_euc1, theta1);
+    const [x2, y2] = polarToCanvas(r_euc2, theta2);
+
+    // Color: golden near center, blue-purple near boundary
+    const progress = i / steps;
+    const r = Math.floor(200 * (1 - progress) + 80 * progress);
+    const g = Math.floor(168 * (1 - progress) + 60 * progress);
+    const bl = Math.floor(75 * (1 - progress) + 220 * progress);
+    const alpha = progress < 0.9 ? 0.9 : 0.9 * (1 - (progress - 0.9) / 0.1);
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = `rgba(${r},${g},${bl},${alpha})`;
+    ctx.lineWidth = 1.5 * (1 - progress * 0.5);
+    ctx.stroke();
+  }
+
+  // Draw phi markers — points where spiral makes quarter turn
+  const quarterTurns = 8;
+  for (let k = 0; k < quarterTurns; k++) {
+    const theta = k * Math.PI / 2 + angleOffset;
+    const r_hyp = 0.15 * Math.exp(b * theta);
+    const r_euc = Math.min(hypToEuc(r_hyp), 0.97);
+    const [px, py] = polarToCanvas(r_euc, theta);
+
+    const sz = Math.max(2, 6 - k * 0.5);
+    const grad = ctx.createRadialGradient(px, py, 0, px, py, sz * 2);
+    grad.addColorStop(0, 'rgba(255, 220, 100, 0.9)');
+    grad.addColorStop(1, 'rgba(255, 220, 100, 0)');
+
+    ctx.beginPath();
+    ctx.arc(px, py, sz * 2, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(px, py, sz * 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 240, 150, 1)';
+    ctx.fill();
+
+    if (k < 6) {
+      ctx.fillStyle = 'rgba(255, 220, 100, 0.7)';
+      ctx.font = `${10 - k * 0.5}px Georgia`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`phi^${k}`, px + 12, py - 8);
+    }
+  }
+
+  ctx.restore();
+}
+
+// Draw center point (ground state)
+function drawCenter() {
+  // Glow
+  const grad = ctx.createRadialGradient(CX, CY, 0, CX, CY, 30);
+  grad.addColorStop(0, 'rgba(255, 230, 120, 0.8)');
+  grad.addColorStop(0.3, 'rgba(200, 168, 75, 0.3)');
+  grad.addColorStop(1, 'rgba(200, 168, 75, 0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, 30, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(CX, CY, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffe87a';
+  ctx.fill();
+
+  // Label
+  ctx.fillStyle = 'rgba(255, 220, 100, 0.9)';
+  ctx.font = 'bold 12px Georgia';
+  ctx.textAlign = 'center';
+  ctx.fillText('phi', CX, CY + 20);
+  ctx.font = '10px Georgia';
+  ctx.fillStyle = 'rgba(200, 168, 75, 0.6)';
+  ctx.fillText('ground state', CX, CY + 33);
+}
+
+// Draw concentric hyperbolic circles
+function drawHypCircles() {
+  ctx.save();
+  for (let rho = 0.5; rho <= 3.0; rho += 0.5) {
+    const r_euc = hypToEuc(rho);
+    ctx.beginPath();
+    ctx.arc(CX, CY, r_euc * R, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(100, 100, 160, ${0.08})`;
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([3, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+}
+
+function draw(angleOffset = 0) {
+  ctx.clearRect(0, 0, W, W);
+
+  // Clip to disk
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(CX, CY, R, 0, Math.PI * 2);
+  ctx.clip();
+
+  drawBackground();
+  drawHypCircles();
+  if (layers.geodesics) drawGeodesics();
+  if (layers.tiling) drawTiling();
+  if (layers.spiral) drawSpiral(angleOffset);
+  drawCenter();
+
+  ctx.restore();
+  drawBoundary();
+}
+
+draw();
+</script>
+</body>
+</html>
